@@ -1,0 +1,15 @@
+config.h
+*.dSYM
+tests/test_alert
+tests/test_cell
+tests/test_commands
+tests/test_crypto
+tests/test_data
+tests/test_dns
+tests/test_firmware
+tests/test_gsm_recovery
+tests/test_ioexpander
+tests/test_parse
+tests/test_power
+tests/test_settings
+.claude

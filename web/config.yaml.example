@@ -1,0 +1,24 @@
+device: <DEVICE IMEI>
+google_maps_api_key: <GOOGLE API KEY>
+session_secret: <RANDOM STRING>  # python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+command_server: http://localhost:65480
+work_calendar_path: /path/to/work_calendar.yaml
+work_alert_hour_from: 7
+work_alert_hour_to: 18
+engine_running_voltage: 13.0
+engine_stopped_count: 10
+udp_host: 0.0.0.0
+udp_port: 65480
+home_check_lat: '<LATITUDE>'
+home_check_lon: '<LONGITUDE>'
+
+pushover:
+  user: <PUSHOVER USER KEY>
+  app: <PUSHOVER APP KEY>
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  database: tracker
+  user: root
+  password: ""

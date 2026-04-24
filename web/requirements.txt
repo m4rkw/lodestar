@@ -1,0 +1,10 @@
+flask
+flask-sock
+gunicorn
+m4rkw-db
+m4rkw-pushover>=0.0.5
+pymysql
+m4rkw-tracing
+python-dateutil
+cryptography
+webauthn

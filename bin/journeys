@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+import sys
+import datetime
+from dateutil import tz
+from db import DB
+
+db = DB({
+    'host': '127.0.0.1',
+    'port': 3306,
+    'database': 'tracker',
+    'user': '',
+    'password': ''
+})
+
+class Tracker:
+
+    def __init__(self):
+        self.columns = ['start_time', 'end_time', 'from_gps', 'to_gps', 'miles']
+
+        if len(sys.argv) >2 and sys.argv[1] == 'since':
+            self.logs(0, sys.argv[2])
+        else:
+            if len(sys.argv) >1:
+                n = int(sys.argv[1])
+            else:
+                n = 10
+
+            self.logs(n)
+
+
+    def logs(self, n, since=None):
+        if since:
+            data = db.query("select * from journey where device_id=2 and start_time > %s order by start_time desc limit %s", [since, n])
+
+        else:
+            data = db.query("select * from journey where device_id=2 order by start_time desc limit %s", [n])
+
+        if len(data) == 0:
+            print("no logs found.")
+            sys.exit(0)
+
+        self.format_logs(data)
+
+
+    def format_logs(self, rows):
+        from_zone = tz.tzutc()
+        to_zone = tz.tzlocal()
+
+        widths = {}
+
+        for row in rows:
+            row['from_gps'] = '%s,%s' % (row['from_latitude'], row['from_longitude'])
+            row['to_gps'] = '%s,%s' % (row['to_latitude'], row['to_longitude'])
+
+        for key in self.columns:
+            widths[key] = len(key)
+
+            for row in rows:
+                if type(row[key]) == datetime.datetime:
+                    row[key] = row[key].strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    row[key] = str(row[key])
+
+                if len(row[key]) > widths[key]:
+                    widths[key] = len(row[key])
+
+        for key in self.columns:
+            sys.stdout.write(key.ljust(widths[key] + 2))
+
+        sys.stdout.write("\n")
+
+        for key in self.columns:
+            sys.stdout.write("-" * (widths[key] + 2))
+        sys.stdout.write("\n")
+
+        miles = 0
+
+        for row in reversed(rows):
+            miles += float(row['miles'])
+
+            for key in self.columns:
+                if key in ['from_gps', 'to_gps']:
+                    value = row[key].split(',')[0].ljust(9,'0') + ',' + row[key].split(',')[1].ljust(9,'0')
+                else:
+                    value = row[key]
+
+                if key == 'miles':
+                    value = value.rjust(5)
+
+                sys.stdout.write(value.ljust(widths[key] + 2))
+
+            sys.stdout.write("\n")
+
+        print("\ntotal miles: %.2f" % (miles))
+
+Tracker()

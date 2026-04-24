@@ -1,0 +1,104 @@
+// Copy to config.h and edit before compiling.
+
+// Engine-off telemetry interval in seconds (remotely configurable via 'int' command)
+#define ENGINE_OFF_LOOP_INTERVAL 3600
+// Battery voltage thresholds (via 242/22Ω divider ADC)
+#define BATTERY_WARNING_LEVEL 11.9f    // Send low-battery alert below this
+#define BATTERY_POWEROFF_LEVEL 11.8f   // Auto power-off below this (after consecutive readings)
+#define SLEEP_SAFETY_VOLTAGE 12.0f     // Skip telemetry during timer wakes below this to conserve battery
+#define BATTERY_CHECK_INTERVAL 86400   // Wake interval (seconds) for battery check when engine-off telemetry is disabled (int=0)
+#define ENGINE_RUNNING_VOLTAGE 13.0f   // Above this, assume engine is running (alternator charging)
+// Send telemetry every N seconds while ignition is on but engine not running
+#define IGNITION_ON_SLEEP_INTERVAL 300
+// Poll battery voltage every N seconds during ignition-on sleep
+#define VOLTAGE_POLL_INTERVAL 5
+
+// Pre-shared 32-byte key for ChaCha20-Poly1305 UDP envelope (64 hex chars).
+// Generate with:  python3 -c "import secrets; print(secrets.token_hex(32))"
+// Must match the device's `psk` column on the server.
+#define PSK_HEX "0000000000000000000000000000000000000000000000000000000000000000"
+// Max size of the CSV telemetry data buffer (bytes)
+#define DATA_LIMIT 2500
+
+// Size of buffer for modem AT command responses
+#define MODEM_REPLY_SIZE 256
+
+// GSM modem timeouts
+#define GSM_MODEM_COMMAND_TIMEOUT 10   // Seconds between retries for multi-attempt AT commands
+#define GSM_AT_TIMEOUT 3000            // Milliseconds to wait for AT command response
+#define GSM_CONNECT_TIMEOUT 15000      // Milliseconds to wait for socket connection
+#define GSM_RECEIVE_TIMEOUT 10000      // Milliseconds to wait for server response after send
+// GPS fix acquisition timeout in milliseconds
+#define GPS_FIX_TIMEOUT 60000
+// Legacy reboot thresholds (superseded by escalation thresholds below)
+#define GSM_SEND_FAILURES_REBOOT 10
+#define GSM_REPLY_FAILURES_REBOOT 10
+// Keep UDP socket open between sends (1=reuse, 0=reconnect each time)
+#define GSM_STAY_ONLINE 1
+
+// Hardware: always-on power supply connected (enables STOP2 sleep, SD persistence, movement alerts)
+#define ALWAYS_ON_POWER 1
+// Hardware: SD card present and enabled (settings persistence, telemetry buffering)
+#define SD_ENABLED 1
+// Hardware: latching relay connected via IOExpander (enables power mode switching)
+#define RELAY_CONNECTED 0
+
+// Full modem power-down during STOP2 sleep (1=power off modem, 0=keep modem alive)
+#define LOW_POWER_STANDBY 1
+
+// Network mode: 0=2G GSM, 1=NB-IoT, 2=LTE Cat-M1 (with NB-IoT/2G fallback), 3=LTE Cat-M1 only
+#define NETWORK_MODE 0
+// Seconds between RAT checks while driving (mode 2 only, 0=disable)
+#define RAT_CHECK_INTERVAL 300
+// Seconds to wait for network registration after modem power-on
+#define NETWORK_REGISTRATION_TIMEOUT 60
+// Preferred PLMN for initial registration (0=auto only)
+#define PREFERRED_PLMN 0
+
+// Server endpoint
+#define HOSTNAME "tracker.example.com"
+#define UDP_PORT "65480"
+// Max UDP datagram payload size
+#define UDP_PACKET_SIZE 1200
+
+// Default APN credentials (overridden by settings struct if saved to SD)
+#define DEFAULT_APN "internet"
+#define DEFAULT_USER ""
+#define DEFAULT_PASS ""
+
+// Number of socket connect retries before failing
+#define CONNECT_RETRY 3
+
+// Movement alarm enabled by default on first boot (before server config)
+#define DEFAULT_MOVEMENT_ALARM 1
+
+// Accelerometer movement detection
+#define ACC_MOVEMENT_THRESHOLD 150     // Delta-g threshold (milli-g) to trigger movement alert
+#define ACC_WAKE_THRESHOLD 10          // LIS2HH12 IG1 threshold register value (~156mg) for STOP2 wake
+#define MOVEMENT_CONFIRM_MS 3000       // Window (ms) for confirming sustained movement after wake
+#define MOVEMENT_CONFIRM_HITS 3        // Required above-threshold readings within confirm window
+#define MOVEMENT_INACTIVITY_RESET 1800 // Seconds without movement before resetting escalating cooldown
+// Shortened engine-off interval after movement detected (seconds)
+#define MOVEMENT_TEMPORARY_ENGINE_OFF_INTERVAL 14400
+// Skip GPS fix during timer wakes if no movement detected for this many seconds
+#define NO_MOVEMENT_GPS_SKIP 86400
+
+// Buffer unsent telemetry records to SD card (1=enable, 0=disable)
+#define SD_BUFFERING 0
+
+#if SD_BUFFERING
+  #define BATCH_SIZE 5                 // Records per transmission when SD buffering enabled
+#else
+  #define BATCH_SIZE 1                 // Records per transmission without SD buffering
+  #define BATCH_HEADROOM 400           // Reserved bytes in data buffer for record overflow
+#endif
+
+// State machine
+enum MainState { STATE_IDLE, STATE_GPS_COLLECT,
+                 STATE_SEND, STATE_SLEEP, STATE_IGNITION_SLEEP,
+                 STATE_ERROR_RECOVERY };
+// Consecutive send failure counts that trigger each escalation level
+#define GSM_ESCALATION_POWERCYCLE 3    // Power-cycle the modem
+#define GSM_ESCALATION_SLEEP      5   // Enter STOP2 sleep to conserve battery
+// Duration of recovery sleep in seconds
+#define GSM_RECOVERY_SLEEP_INTERVAL 300

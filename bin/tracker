@@ -1,0 +1,172 @@
+#!/usr/bin/env python
+
+import sys
+import datetime
+from dateutil import tz
+import time
+from db import DB
+import decimal
+
+db = DB({
+    'host': '127.0.0.1',
+    'port': 3306,
+    'database': 'tracker',
+    'user': '',
+    'password': ''
+})
+
+COLUMN_MAP = {
+    'battery_level': 'battery',
+    'ignition_state': 'ignition',
+    'satellites': 'sats',
+    'battery': 'batt',
+    'ignition': 'ign',
+    'waketime': 'time',
+}
+
+class Tracker:
+
+    def __init__(self):
+        self.columns = [
+            'gsm_timestamp',
+            'latitude',
+            'longitude',
+            'speed',
+            'heading',
+            'satellites',
+            'battery_level',
+            'ignition_state',
+            'waketime',
+        ]
+
+        self.widths = {}
+        self.last_id = 0
+
+        if '--day' in sys.argv:
+            self.logs(day=sys.argv[2])
+            sys.exit()
+
+        if '-f' in sys.argv:
+            today = datetime.date.today().strftime('%Y-%m-%d')
+            self.logs(day=today)
+            self.follow()
+        else:
+            self.logs()
+
+
+    def follow(self):
+        while 1:
+            time.sleep(1)
+
+            data = db.query("select `log`.* from `log` where `id` > %s order by `id` asc", (self.last_id,))
+
+            if len(data) == 0:
+                continue
+
+            self.format_logs(data)
+            self.last_id = max(r['id'] for r in data)
+
+
+    def logs(self, day=None):
+        if day != None:
+            _from = day + ' 00:00:00'
+            _to = day + ' 23:59:59'
+
+            data = db.query("select `log`.* from `log` where `gsm_timestamp` >= %s and `gsm_timestamp` <= %s order by `gsm_timestamp` asc", (_from, _to))
+        else:
+            day = self.get_last_day_with_logs()
+
+            day_before = (datetime.datetime.strptime(day, '%Y-%m-%d') - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+
+            data = db.query("select `log`.* from `log` where `gsm_timestamp` >= %s order by `gsm_timestamp` asc", (day_before + ' 00:00:00',))
+
+        if len(data) == 0:
+            return
+
+        self.format_logs(data)
+
+        self.last_id = max(r['id'] for r in data)
+
+
+    def get_last_day_with_logs(self):
+        row = db.query(
+            "select `gsm_timestamp` from `log` order by `id` desc limit 1"
+        )
+
+        return row[0]['gsm_timestamp'].strftime('%Y-%m-%d')
+
+
+    def format_logs(self, rows):
+        now = datetime.datetime.now()
+        cutoff = now + datetime.timedelta(minutes=1)
+        rows = [r for r in rows if r['gsm_timestamp'] <= cutoff]
+
+        if len(rows) == 0:
+            return
+
+        from_zone = tz.tzutc()
+        to_zone = tz.tzlocal()
+
+        if self.widths == {}:
+            for key in self.columns:
+                if key in COLUMN_MAP:
+                    output_key = COLUMN_MAP[key]
+                else:
+                    output_key = key
+
+                self.widths[output_key] = len(output_key)
+
+                for row in rows:
+                    row[output_key] = self.value_to_string(key, row[key])
+
+                    if len(self.value_to_string(key, row[key])) > self.widths[output_key]:
+                        self.widths[output_key] = len(self.value_to_string(key, row[key]))
+
+            for key in self.columns:
+                if key in COLUMN_MAP:
+                    output_key = COLUMN_MAP[key]
+                else:
+                    output_key = key
+
+                sys.stdout.write(output_key.ljust(self.widths[output_key] + 2))
+
+            sys.stdout.write("\n")
+
+            for key in self.columns:
+                if key in COLUMN_MAP:
+                    output_key = COLUMN_MAP[key]
+                else:
+                    output_key = key
+
+                sys.stdout.write("-" * (self.widths[output_key] + 2))
+            sys.stdout.write("\n")
+
+        for row in rows:
+            for key in self.columns:
+                if key in COLUMN_MAP:
+                    output_key = COLUMN_MAP[key]
+                else:
+                    output_key = key
+
+                row[key] = self.value_to_string(key, row[key])
+                sys.stdout.write(row[key].ljust(self.widths[output_key] + 2))
+
+            sys.stdout.write("\n")
+
+
+    def value_to_string(self, key, value):
+        if value is None:
+            return ''
+
+        if key == 'ignition_state':
+            return 'on' if value == 1 else 'off'
+
+        if type(value) == datetime.datetime:
+            value = value.strftime('%Y-%m-%d %H:%M:%S.%f')
+        if type(value) in [decimal.Decimal, int, float]:
+            value = str(value)
+
+        return value
+
+
+Tracker()
