@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 - 2026-04-24
+
+- minor typo in config.yaml.example
+
 ## 0.2.1 - 2026-04-23
 
 Web
