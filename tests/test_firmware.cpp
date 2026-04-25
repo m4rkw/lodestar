@@ -36,7 +36,6 @@ byte send_int_to_server;
 byte last_send_ok;
 byte set_power_state;
 byte power_off_relay;
-byte save_config;
 byte powered_on;
 float gps_speed;
 float battery_v;
@@ -70,11 +69,9 @@ void alert_enqueue(const char *msg, int8_t priority) {
 
 int power_supply_mode_calls = 0;
 int power_supply_off_calls = 0;
-int settings_save_calls = 0;
 
 void set_power_supply_mode() { power_supply_mode_calls++; }
 void set_power_supply_off()  { power_supply_off_calls++; }
-void settings_save()         { settings_save_calls++; }
 
 // -- Functions under test (copied from firmware.ino) ------------------------
 
@@ -100,10 +97,6 @@ void handle_post_send() {
     if (power_off_relay == 1 && last_send_ok == 1) {
         power_off_relay = 0;
         set_power_supply_off();
-    }
-    if (save_config == 1) {
-        settings_save();
-        save_config = 0;
     }
 }
 
@@ -141,7 +134,6 @@ void check_battery_poweroff(float v) {
         if (confirm_battery_low(BATTERY_POWEROFF_LEVEL)) {
             config.always_on = 0;
             set_power_supply_mode();
-            settings_save();
         }
     }
 }
@@ -159,7 +151,6 @@ void reset_state() {
     last_send_ok = 1;
     set_power_state = 0;
     power_off_relay = 0;
-    save_config = 0;
     powered_on = 0;
     gps_speed = 0;
     battery_v = 14.0f;  // default: engine running
@@ -170,7 +161,6 @@ void reset_state() {
     captured_alert_count = 0;
     power_supply_mode_calls = 0;
     power_supply_off_calls = 0;
-    settings_save_calls = 0;
     mock_millis_value = 10000;
     strlcpy(time_char, "14/03/26,12:00:00.000000+00", sizeof(time_char));
     strlcpy(lat_current, "51.509865", sizeof(lat_current));
@@ -390,14 +380,6 @@ void test_post_send_power_off_relay() {
     ASSERT_EQ(power_off_relay, 0);
 }
 
-void test_post_send_save_config() {
-    reset_state();
-    save_config = 1;
-    handle_post_send();
-    ASSERT_EQ(settings_save_calls, 1);
-    ASSERT_EQ(save_config, 0);
-}
-
 // ===========================================================================
 // handle_ignition_state tests
 // ===========================================================================
@@ -414,7 +396,6 @@ void test_battery_poweroff_triggers_when_confirmed() {
     check_battery_poweroff(11.7f);
     ASSERT_EQ(config.always_on, 0);
     ASSERT_EQ(power_supply_mode_calls, 1);
-    ASSERT_EQ(settings_save_calls, 1);
 }
 
 void test_battery_poweroff_only_in_always_on() {
@@ -533,7 +514,6 @@ int main() {
     RUN_TEST(test_post_send_power_state_on_success);
     RUN_TEST(test_post_send_power_state_deferred_on_failure);
     RUN_TEST(test_post_send_power_off_relay);
-    RUN_TEST(test_post_send_save_config);
 
     RUN_TEST(test_battery_poweroff_triggers_when_confirmed);
     RUN_TEST(test_battery_poweroff_only_in_always_on);

@@ -9,8 +9,12 @@ engine_running_voltage: 13.0
 engine_stopped_count: 10
 udp_host: 0.0.0.0
 udp_port: 65480
-home_check_lat: <LATITUDE>
-home_check_lon: <LONGITUDE>
+
+home_check:
+  device_id: 1
+  latitude: 0.0
+  longitude: 0.0
+  radius_m: 300
 
 pushover:
   user: <PUSHOVER USER KEY>

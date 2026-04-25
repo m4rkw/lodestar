@@ -14,7 +14,6 @@ ALWAYS_ON_POWER      = 1
 RELAY_CONNECTED      = 1
 GSM_STAY_ONLINE      = 1
 HIGH_FREQUENCY_TELEMETRY = 1
-SD_BUFFERING         = 0
 
 # -- Network -----------------------------------------------------------------
 HOSTNAME             = tracker.rkw.io

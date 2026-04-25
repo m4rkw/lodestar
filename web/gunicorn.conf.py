@@ -14,3 +14,22 @@ os.environ['GUNICORN_MASTER_PID'] = str(os.getpid())
 # Obj-C fork-safety abort that killed workers when the UDP thread was
 # doing DB work at fork() time.
 preload_app = True
+
+# Long-lived WebSocket handlers (ws_carpos) sit in a poll/sleep loop and can't
+# drain on shutdown, so the default 30s graceful_timeout makes restarts hold
+# port 5007 long enough for new gunicorn instances to fail bind and bounce
+# under launchd's KeepAlive. Cut workers fast — browsers reconnect WebSockets
+# automatically and HTTP requests are short.
+graceful_timeout = 2
+
+
+def post_fork(server, worker):
+    # The master opens a MySQL connection at import time (device lookup) which
+    # the worker inherits via fork(). Sharing a TCP socket across processes
+    # confuses both pymysql and the server — the worker's first ping() can
+    # stall for the full TCP timeout before reconnecting. Drop the inherited
+    # handles so each worker dials its own connection on first use.
+    del server, worker
+    import main
+    main.db._conn = None
+    main.udp_db._conn = None

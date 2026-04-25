@@ -9,10 +9,6 @@
 #include <SPI.h>
 #include <TinyGPS.h>
 
-#if SD_ENABLED
-#include <STM32SD.h>
-#endif
-
 #ifdef DEBUG
 #define debug_print(x)    debug_port.println(x)
 #else
@@ -24,7 +20,6 @@ char data_current[DATA_LIMIT];     //data collected in one go, max 2500 chars
 int data_index = 0;                //current data index (where last data record stopped)
 char time_char[32];                         //time attached to every data line
 char modem_reply[MODEM_REPLY_SIZE];         //data received from modem
-byte save_config = 0;            //flag to save config
 byte power_reboot = 0;                     //flag to reboot everything (used after new settings have been saved)
 
 unsigned long last_time_gps, last_date_gps;
@@ -144,18 +139,12 @@ void setup() {
 #endif
   led_off();
 
-#if SD_ENABLED
-  sd_init();
-#endif
   crypto_init();
   settings_load();
 
   acc_init();
 #if ALWAYS_ON_POWER
   rtc_wakeup_init();
-#if SD_ENABLED && SD_BUFFERING
-  storage_init();
-#endif
 #endif
   gps_setup();
   gsm_setup();  // configures modem and starts network search (async)
@@ -216,12 +205,6 @@ void setup() {
     }
   }
 
-#if SD_ENABLED
-  extern byte sd_ready;
-  if (!sd_ready) {
-    debug_print(F("WARNING: no SD card, running with defaults only"));
-  }
-#endif
 
 #if RELAY_CONNECTED
   // ensure relay matches config (e.g. after battery poweroff reset it to ignition-only)
@@ -263,11 +246,6 @@ void handle_post_send() {
   }
 #endif
 
-  // save config if flagged
-  if (save_config == 1) {
-    settings_save();
-    save_config = 0;
-  }
 }
 
 #if ALWAYS_ON_POWER
@@ -463,9 +441,7 @@ void loop() {
       // Send immediately when: batch full, engine off, first boot, settings sync, or retry
       if (buffered_records >= BATCH_SIZE || ignition != 0
           || previous_ignition == -1 || send_int_to_server || last_send_ok == 0
-#if !SD_BUFFERING
           || data_index >= DATA_LIMIT - BATCH_HEADROOM
-#endif
           ) {
         main_state = STATE_SEND;
       } else {
@@ -719,7 +695,6 @@ void loop() {
                 use_cached_gps = 0;
                 pending_server_cmd[0] = '\0';
               }
-              if (save_config) { settings_save(); save_config = 0; }
               if (power_reboot) reboot();
 #endif
             }
@@ -736,8 +711,7 @@ void loop() {
                   cmd_run(pending_server_cmd);
                   pending_server_cmd[0] = '\0';
                 }
-                if (save_config) { settings_save(); save_config = 0; }
-                if (power_reboot) reboot();
+                  if (power_reboot) reboot();
               }
             }
 
@@ -810,7 +784,6 @@ void loop() {
                 if (alert_count > 0) alert_send_standalone();
               }
 
-              if (save_config) { settings_save(); save_config = 0; }
               if (power_reboot) reboot();
               enter_low_power_standby_modem();
             } else {
@@ -824,8 +797,7 @@ void loop() {
                   cmd_run(pending_server_cmd);
                   pending_server_cmd[0] = '\0';
                 }
-                if (save_config) { settings_save(); save_config = 0; }
-                if (power_reboot) reboot();
+                  if (power_reboot) reboot();
                 enter_low_power_standby_modem();
               } else {
                 debug_print(F("Cooldown active, ignoring"));
@@ -922,7 +894,6 @@ void loop() {
             use_cached_gps = 0;
             pending_server_cmd[0] = '\0';
           }
-          if (save_config) { settings_save(); save_config = 0; }
           if (power_reboot) reboot();
 #endif
 

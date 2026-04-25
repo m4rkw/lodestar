@@ -28,7 +28,6 @@ struct settings {
 };
 
 settings config;
-byte save_config;
 byte set_power_state;
 byte power_off_relay;
 byte power_reboot;
@@ -75,7 +74,6 @@ void send_data()      { send_data_calls++; }
 void reset_state() {
     memset(&config, 0, sizeof(config));
     config.loop_interval = 3600;
-    save_config = 0;
     set_power_state = 0;
     power_off_relay = 0;
     power_reboot = 0;
@@ -100,7 +98,6 @@ void test_int_normal() {
     char cmd[] = "int=900";
     cmd_run(cmd);
     ASSERT_EQ(config.loop_interval, 900);
-    ASSERT_EQ(save_config, 1);
     ASSERT_EQ(send_int_to_server, 1);
 }
 
@@ -127,7 +124,6 @@ void test_alwayson_change_triggers_power_state() {
     cmd_run(cmd);
     ASSERT_EQ(config.always_on, 1);
     ASSERT_EQ(set_power_state, 1);
-    ASSERT_EQ(save_config, 1);
     ASSERT_EQ(send_int_to_server, 1);
 }
 

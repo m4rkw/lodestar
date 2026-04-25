@@ -45,7 +45,6 @@ endif
 	@echo "#define RELAY_CONNECTED $(RELAY_CONNECTED)" >> $@
 	@echo "#define GSM_STAY_ONLINE $(GSM_STAY_ONLINE)" >> $@
 	@echo "#define HIGH_FREQUENCY_TELEMETRY $(HIGH_FREQUENCY_TELEMETRY)" >> $@
-	@echo "#define SD_BUFFERING $(SD_BUFFERING)" >> $@
 	@echo "" >> $@
 	@echo "#define HOSTNAME \"$(HOSTNAME)\"" >> $@
 	@echo "#define UDP_PORT \"$(UDP_PORT)\"" >> $@
@@ -87,12 +86,7 @@ endif
 	@echo "#define MOVEMENT_INACTIVITY_RESET $(MOVEMENT_INACTIVITY_RESET)" >> $@
 	@echo "#define NO_MOVEMENT_GPS_SKIP $(NO_MOVEMENT_GPS_SKIP)" >> $@
 	@echo "" >> $@
-	@echo "// -- Batch size --" >> $@
-	@echo "#if SD_BUFFERING" >> $@
-	@echo "  #define BATCH_SIZE 5" >> $@
-	@echo "#else" >> $@
-	@echo "  #define BATCH_SIZE 1" >> $@
-	@echo "#endif" >> $@
+	@echo "#define BATCH_SIZE 1" >> $@
 	@echo "" >> $@
 	@echo "// -- State machine --" >> $@
 	@echo "enum MainState { STATE_IDLE, STATE_GPS_COLLECT," >> $@

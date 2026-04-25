@@ -204,54 +204,14 @@ int collect_data(int ignitionState) {
  * This function send collected data using HTTP or TCP
  */
 
-#ifdef SD_SEND_DEBUG
-int sd_debug_count = 0;
-#endif
-
 void send_data() {
     debug_print(F("Current:"));
     debug_print(data_current);
 
-#if SD_ENABLED && SD_BUFFERING
-    // remember where current record ends before appending old ones
-    int current_len = strlen(data_current);
-    extern uint32_t sd_drain_pos;
-    extern int sd_pending_count;
-    uint32_t saved_drain_pos = sd_drain_pos;
-    int saved_pending_count = sd_pending_count;
-    int appended = storage_append_pending();
-
-    if (appended > 0) {
-      debug_print(F("SD: appended pending records:"));
-      debug_print(appended);
-    }
-#endif
-
-    int i;
-
-#ifdef SD_SEND_DEBUG
-    sd_debug_count++;
-    if (sd_debug_count % 10 != 0) {
-        debug_print(F("DEBUG: simulating send failure"));
-        i = 0;
-    } else {
-        i = gsm_send_data();
-    }
-#else
-    i = gsm_send_data();
-#endif
+    int i = gsm_send_data();
 
     if(i != 1) {
         debug_print(F("Can not send data"));
-#if SD_ENABLED && SD_BUFFERING
-        debug_print(F("Saving to SD card"));
-        // revert drain position — appended records weren't sent
-        sd_drain_pos = saved_drain_pos;
-        sd_pending_count = saved_pending_count;
-        // save only the current record
-        data_current[current_len] = '\0';
-        storage_save_current();
-#endif
         last_send_ok = 0;
     } else {
         debug_print(F("Data sent successfully."));
@@ -263,11 +223,5 @@ void send_data() {
 
         // send any queued alerts now that connection is up
         alert_send();
-
-#if SD_ENABLED && SD_BUFFERING
-        if (appended > 0 && !storage_has_pending()) {
-          storage_finish_drain();
-        }
-#endif
     }
 }

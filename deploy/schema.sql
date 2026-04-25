@@ -57,6 +57,7 @@ CREATE TABLE `device` (
   `overnight_alarm` tinyint(4) DEFAULT 0,
   `overnight_alarm_hour_from` tinyint(4) DEFAULT 23,
   `overnight_alarm_hour_to` tinyint(4) DEFAULT 6,
+  `last_nonce` varbinary(12) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;

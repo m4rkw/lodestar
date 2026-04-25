@@ -36,10 +36,8 @@
 // Keep UDP socket open between sends (1=reuse, 0=reconnect each time)
 #define GSM_STAY_ONLINE 1
 
-// Hardware: always-on power supply connected (enables STOP2 sleep, SD persistence, movement alerts)
+// Hardware: always-on power supply connected (enables STOP2 sleep, movement alerts)
 #define ALWAYS_ON_POWER 1
-// Hardware: SD card present and enabled (settings persistence, telemetry buffering)
-#define SD_ENABLED 1
 // Hardware: latching relay connected via IOExpander (enables power mode switching)
 #define RELAY_CONNECTED 0
 
@@ -61,7 +59,7 @@
 // Max UDP datagram payload size
 #define UDP_PACKET_SIZE 1200
 
-// Default APN credentials (overridden by settings struct if saved to SD)
+// Default APN credentials
 #define DEFAULT_APN "internet"
 #define DEFAULT_USER ""
 #define DEFAULT_PASS ""
@@ -83,15 +81,8 @@
 // Skip GPS fix during timer wakes if no movement detected for this many seconds
 #define NO_MOVEMENT_GPS_SKIP 86400
 
-// Buffer unsent telemetry records to SD card (1=enable, 0=disable)
-#define SD_BUFFERING 0
-
-#if SD_BUFFERING
-  #define BATCH_SIZE 5                 // Records per transmission when SD buffering enabled
-#else
-  #define BATCH_SIZE 1                 // Records per transmission without SD buffering
-  #define BATCH_HEADROOM 400           // Reserved bytes in data buffer for record overflow
-#endif
+#define BATCH_SIZE 1                 // Records per transmission
+#define BATCH_HEADROOM 400           // Reserved bytes in data buffer for record overflow
 
 // State machine
 enum MainState { STATE_IDLE, STATE_GPS_COLLECT,

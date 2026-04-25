@@ -1117,6 +1117,13 @@ int gsm_send_done() {
 // Buffer is static (not on stack) because UDP_PACKET_SIZE can be 1200.
 static uint8_t udp_envelope[UDP_PACKET_SIZE];
 
+// Nonce of the most recently sent request. The server echoes this into the
+// response AAD, so only a response bound to a request we actually issued this
+// session will authenticate — captured responses can't be replayed across a
+// reboot (new RNG output = new last_request_nonce).
+static uint8_t last_request_nonce[CP_NONCE_BYTES];
+static bool    last_request_nonce_set = false;
+
 int gsm_send_udp_current() {
   debug_print(F("gsm_send_udp(): sending data."));
 
@@ -1186,6 +1193,11 @@ int gsm_send_udp_current() {
             (const uint8_t*)&data_current[offset], (size_t)chunk_len,
             ct, tag);
 
+    // Record nonce for challenge-response: the server binds its reply to
+    // this value via the response AAD.
+    memcpy(last_request_nonce, nonce, CP_NONCE_BYTES);
+    last_request_nonce_set = true;
+
     debug_print(F("UDP datagram size:"));
     debug_print(dgram_len);
 
@@ -1210,7 +1222,10 @@ int gsm_send_udp_current() {
 //
 // Server response wire format (binary):
 //   [12] nonce  [N] ciphertext  [16] tag
-// AAD = the device's IMEI (binds the response to this device).
+// AAD = device IMEI || last_request_nonce (the nonce from our most recent
+// outgoing request). The server sealed the reply with this AAD, so if we
+// don't have a matching request outstanding (e.g. replayed datagram from a
+// prior exchange, or datagram sent before this boot) AEAD auth fails.
 //
 // Decrypted plaintext is the same compact CSV the firmware used pre-crypto:
 //   1,int,ao,ma[,cmd]
@@ -1332,8 +1347,20 @@ void gsm_read_udp_response() {
 
   static uint8_t pt[UDP_PACKET_SIZE];
   int imei_len = strlen(config.imei);
+  if (!last_request_nonce_set) {
+    debug_print(F("UDP: response before any request"));
+    return;
+  }
+  // AAD = IMEI || last_request_nonce
+  static uint8_t aad[20 + CP_NONCE_BYTES];
+  if (imei_len > 20) {
+    debug_print(F("UDP: bad imei length"));
+    return;
+  }
+  memcpy(aad, config.imei, imei_len);
+  memcpy(aad + imei_len, last_request_nonce, CP_NONCE_BYTES);
   if (!cp_open(config.psk, nonce,
-               (const uint8_t*)config.imei, (size_t)imei_len,
+               aad, (size_t)(imei_len + CP_NONCE_BYTES),
                ct, (size_t)ct_len, tag, pt)) {
     debug_print(F("UDP: auth failed"));
     return;
@@ -1380,16 +1407,13 @@ void gsm_read_udp_response() {
   if (!send_int_to_server) {
     if ((r_int == 0 || r_int >= 10) && r_int != config.loop_interval) {
       config.loop_interval = r_int;
-      save_config = 1;
     }
     if (r_ao != config.always_on) {
       set_power_state = 1;
       config.always_on = r_ao;
-      save_config = 1;
     }
     if (r_ma != config.movement_alarm) {
       config.movement_alarm = r_ma;
-      save_config = 1;
     }
   } else {
     if (r_int == config.loop_interval && r_ao == config.always_on
@@ -1410,7 +1434,6 @@ void gsm_read_udp_response() {
   if (!send_int_to_server) {
     if ((r_int == 0 || r_int >= 10) && r_int != config.loop_interval) {
       config.loop_interval = r_int;
-      save_config = 1;
     }
   } else {
     if (r_int == config.loop_interval) {

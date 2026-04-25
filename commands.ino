@@ -17,7 +17,6 @@ void cmd_run(char *cmd) {
         if (val != 0 && val < 10) val = 10;
         int old_interval = config.loop_interval;
         config.loop_interval = val;
-        save_config = 1;
         send_int_to_server = 1;
         char msg[60];
         snprintf(msg, sizeof(msg), "engine-off interval changed; %d -> %ld", old_interval, val);
@@ -30,7 +29,6 @@ void cmd_run(char *cmd) {
         tmp += strlen("movealarm=");
         val = atoi(tmp);
         config.movement_alarm = (val != 0) ? 1 : 0;
-        save_config = 1;
         send_int_to_server = 1;
         if (config.movement_alarm) {
           alert_enqueue("movement alarm ON", 0);
@@ -51,7 +49,6 @@ void cmd_run(char *cmd) {
         }
 
         config.always_on = val;
-        save_config = 1;
 
         if (config.always_on == 1) {
           alert_enqueue("enabling always-on power", 0);
@@ -72,7 +69,6 @@ void cmd_run(char *cmd) {
         if (saved_loop_interval >= 0) {
           config.loop_interval = saved_loop_interval;
           saved_loop_interval = -1;
-          save_config = 1;
         }
         char msg[60];
         snprintf(msg, sizeof(msg), "movement reset; int=%d", config.loop_interval);

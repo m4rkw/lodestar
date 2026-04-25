@@ -7,7 +7,6 @@
 #define RELAY_CONNECTED 1
 #define GSM_STAY_ONLINE 1
 #define HIGH_FREQUENCY_TELEMETRY 1
-#define SD_BUFFERING 0
 
 #define HOSTNAME "tracker.rkw.io"
 #define UDP_PORT "65480"
@@ -49,12 +48,7 @@
 #define MOVEMENT_INACTIVITY_RESET 1800
 #define NO_MOVEMENT_GPS_SKIP 86400
 
-// -- Batch size --
-#if SD_BUFFERING
-  #define BATCH_SIZE 5
-#else
-  #define BATCH_SIZE 1
-#endif
+#define BATCH_SIZE 1
 
 // -- State machine --
 enum MainState { STATE_IDLE, STATE_GPS_COLLECT,

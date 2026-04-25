@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.3.0 - 2026-04-24
+
+Security uplift across firmware and web. **Schema migration required** (new
+`device.last_nonce` column — see `deploy/schema.sql`). A `web/security.md`
+review document is included covering the gaps this release closes.
+
+### Firmware
+
+- **Challenge-response binding for server→device replies.** The device now
+  caches the nonce of its most recent outgoing request and rejects any
+  response whose AEAD AAD isn't `IMEI || last_request_nonce`. A reboot
+  invalidates any captured response (new RNG output → new request nonce),
+  closing the cross-session replay window. New `test_crypto` case
+  `test_response_replay_different_request_nonce` covers the binding.
+- **SD-card dead code removed.** `storage.ino`, every `#if SD_ENABLED` block,
+  the orphaned `save_config` flag, and `settings_save()` / `settings_validate()`
+  have all been deleted along with the `SD_BUFFERING` batch-size conditional
+  and the legacy `KEY` define. SD was already compile-time disabled, so this
+  is no functional change — pure attack-surface and footprint reduction.
+- **Stale TCP/HTTP scaffolding removed from `config.h.example`.** `USE_UDP`,
+  `PROTO`, `HTTP_PORT`, `HTTP_HEADER1..4`, `PACKET_SIZE`, and
+  `PACKET_SIZE_DELIVERY` are gone — TCP/HTTP support was dropped in 0.2.0
+  but the defines lingered.
+
+### Web
+
+- **Response envelopes bound to request nonce.** `_encrypt_response` now adds
+  the request's nonce to the AAD (`IMEI || req_nonce`), so a captured
+  server→device reply can no longer be replayed against a later request.
+- **Persistent server-side nonce-replay window.** New `device.last_nonce`
+  column seeds the in-memory replay window on first packet after a restart,
+  closing the same-second replay window that previously existed across
+  process restarts.
+- **Per-IP rate limit on failed-auth UDP log lines.** Decrypt failures are
+  logged once per IP per 60s window, then 1-in-20, preventing a spoofed-UDP
+  flood from filling `udp.log`.
+- **Jinja autoescape on for `.tpl` templates.** Flask's default
+  `select_autoescape` doesn't cover `.tpl`, so telemetry fields rendered via
+  `{{ … }}` were unescaped — fixes a stored-XSS class via device-controlled
+  fields like `rat`, `registration`, `operator`.
+- **`MAX_CONTENT_LENGTH = 1 MB`** caps HTTP POST bodies to stop log-flood /
+  memory-DoS via `/api/1.0/log` and `/api/1.0/alert`.
+- **WebAuthn blobs migrated from `pickle` to `json`** (credential record and
+  challenge). Eliminates pickle-deserialisation risk if the DB is ever
+  tampered with. `credential_id` / `public_key` are now base64-encoded inside
+  the JSON blob.
+- **WebAuthn credential id from request payload, not stored record.** The
+  `AuthenticationCredential.id` is now taken from `data['user_id']` so the
+  authenticator's reported credential id is validated against the posted
+  value rather than silently trusting the stored one.
+- **`HOME_CHECK_*` moved out of source into `config.yaml`** under a
+  `home_check:` block (`device_id`, `latitude`, `longitude`, `radius_m`).
+  `/api/1.0/home` returns an error when unconfigured instead of silently
+  querying device id 0.
+- **Gunicorn `graceful_timeout = 2`** so long-lived `ws_carpos` WebSocket
+  handlers don't hold port 5007 across restarts (browsers reconnect
+  automatically). New `post_fork` hook drops the master-inherited MySQL
+  connections so each worker dials its own — fixes a startup stall where the
+  worker's first `ping()` would hang on the shared TCP socket.
+- **WebSocket telemetry stream restored to per-connection DB polling.** A
+  brief experiment with a process-wide push fan-out (`_position_condition` +
+  `notify_position_update`) is reverted — under gunicorn workers the publish
+  side never ran in the same process as the subscribers, so the stream went
+  silent. Each `ws_carpos` handler again reads `log` directly with a 1s
+  cadence and a 10s keep-alive ping.
+
 ## 0.2.2 - 2026-04-24
 
 - minor typo in config.yaml.example

@@ -34,7 +34,6 @@ import secrets
 import datetime
 import logging
 import threading
-import pickle
 import base64
 import uuid
 import pymysql
@@ -72,10 +71,11 @@ MAX_DGRAM   = 2048
 
 # Home check: detects tracker stall by comparing the vehicle's last logged
 # position against the user's home location when called.
-HOME_CHECK_DEVICE_ID = 2
-HOME_CHECK_LAT       = _config.get('home_check_lat')
-HOME_CHECK_LON       = _config.get('home_check_lon')
-HOME_CHECK_RADIUS_M  = 300
+_home_check_cfg       = _config.get('home_check') or {}
+HOME_CHECK_DEVICE_ID = _home_check_cfg.get('device_id')
+HOME_CHECK_LAT       = _home_check_cfg.get('latitude')
+HOME_CHECK_LON       = _home_check_cfg.get('longitude')
+HOME_CHECK_RADIUS_M  = _home_check_cfg.get('radius_m', 300)
 
 REQUIRED_KEYS = [
     'latitude', 'longitude', 'speed', 'altitude', 'heading',
@@ -462,22 +462,6 @@ def process_record(data, device, ip, database=None):
     column_names = ', '.join(f'`{c}`' for c in columns)
     database.query(f"insert into `log` ({column_names}) values ({placeholders})", values)
 
-    operator = lookup_operator(entry.get('mcc'), entry.get('mnc'), database=database)
-
-    # broadcast to WebSocket clients
-    notify_position_update(device['id'], {
-        'latitude': float(entry['latitude']),
-        'longitude': float(entry['longitude']),
-        'speed': float(entry['speed']),
-        'altitude': float(entry['altitude']),
-        'heading': float(entry['heading']),
-        'timestamp': now.strftime('%d.%m.%Y %H:%M:%S'),
-        'battery_level': entry['battery_level'],
-        'ignition_state': entry['ignition_state'],
-        'operator': operator or '',
-        'rat': entry.get('rat') or '',
-    })
-
     # persist device config when sent by the tracker
     update_fields = []
     update_values = []
@@ -540,6 +524,10 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1, x_port=1, x_proto=1)
 app.secret_key = SESSION_SECRET
 app.permanent_session_lifetime = datetime.timedelta(days=30)
+# Flask's default select_autoescape() skips .tpl; enable for everything so
+# user-controlled telemetry fields can't inject script when rendered.
+app.jinja_env.autoescape = True
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 sock = Sock(app)
 
 
@@ -583,23 +571,6 @@ def _origin():
     if (proto == 'https' and port == 443) or (proto == 'http' and port == 80):
         return f'{proto}://{hostname}'
     return f'{proto}://{hostname}:{port}'
-
-# -- WebSocket broadcast state -----------------------------------------------
-
-_position_data = None
-_position_version = 0
-_position_condition = threading.Condition()
-
-
-def notify_position_update(device_id, data):
-    """Called after DB insert to push position data to WebSocket clients."""
-    global _position_data, _position_version
-    if device_id != DEVICE_ID:
-        return
-    with _position_condition:
-        _position_data = data
-        _position_version += 1
-        _position_condition.notify_all()
 
 def unauth():
     return Response(
@@ -729,11 +700,11 @@ def register():
             (
                 username,
                 credential.id,
-                base64.b64encode(pickle.dumps({
-                    'credential_id': credential.id,
-                    'public_key': verification.credential_public_key,
+                json.dumps({
+                    'credential_id': base64.b64encode(credential.raw_id).decode('ascii'),
+                    'public_key': base64.b64encode(verification.credential_public_key).decode('ascii'),
                     'sign_count': verification.sign_count,
-                })).decode('utf8'),
+                }),
             ),
         )
 
@@ -871,7 +842,7 @@ def authoptions():
         (
             user['user_id'],
             session['session_id'],
-            base64.b64encode(pickle.dumps(options.challenge)).decode('utf8'),
+            base64.b64encode(options.challenge).decode('ascii'),
             int(time.time()),
             request.headers.get('User-Agent', ''),
             ip,
@@ -948,8 +919,13 @@ def authenticate():
             headers={'Content-Type': 'application/json'},
         )
 
-    challenge = pickle.loads(base64.b64decode(ao['authoptions'].encode('utf8')))
-    user = pickle.loads(base64.b64decode(userobj['credential'].encode('utf8')))
+    challenge = base64.b64decode(ao['authoptions'])
+    _cred = json.loads(userobj['credential'])
+    user = {
+        'credential_id': base64.b64decode(_cred['credential_id']),
+        'public_key': base64.b64decode(_cred['public_key']),
+        'sign_count': _cred['sign_count'],
+    }
     auth_data = data['authentication_data']
 
     try:
@@ -959,7 +935,7 @@ def authenticate():
             signature=urlsafe_b64decode(auth_data['response']['signature']),
         )
         credential = AuthenticationCredential(
-            id=user['credential_id'],
+            id=data.get('user_id'),
             raw_id=urlsafe_b64decode(auth_data['rawId']),
             response=response,
             type='public-key',
@@ -1028,6 +1004,9 @@ def track(path):
 def home_check():
     if not _check_bearer():
         return unauth()
+
+    if HOME_CHECK_DEVICE_ID is None or HOME_CHECK_LAT is None or HOME_CHECK_LON is None:
+        return error('home_check not configured')
 
     last_log = db.one(
         "select latitude, longitude from `log` where device_id = %s order by id desc limit 1",
@@ -1376,29 +1355,43 @@ def ws_carpos(ws):
         ws.close(1008, 'unauthorised')
         return
 
-    version = 0
-    while True:
-        send_ping = False
-        with _position_condition:
-            if not _position_condition.wait_for(
-                lambda: _position_version != version, timeout=10
-            ):
-                send_ping = True
-            else:
-                version = _position_version
-                data = _position_data
+    ws_db = DB(DB_CONFIG)
+    last_id = 0
+    last_ping = time.time()
+    while ws.connected:
+        row = ws_db.one(
+            "select * from `log` where `device_id` = %s and `id` > %s order by `id` desc limit 1",
+            (DEVICE_ID, last_id),
+        )
 
-        if send_ping:
-            try:
-                ws.send('{"ping":true}')
-            except Exception:
-                return
-            continue
+        data = None
+        if row:
+            last_id = row['id']
+            operator = lookup_operator(row.get('mcc'), row.get('mnc'), database=ws_db) or ''
+            data = {
+                'latitude': float(row['latitude']) if row['latitude'] else 0,
+                'longitude': float(row['longitude']) if row['longitude'] else 0,
+                'speed': float(row['speed']) if row['speed'] else 0,
+                'altitude': float(row['altitude']) if row['altitude'] else 0,
+                'heading': float(row['heading']) if row['heading'] else 0,
+                'timestamp': row['timestamp'].strftime('%d.%m.%Y %H:%M:%S') if row['timestamp'] else '',
+                'battery_level': float(row['battery_level']) if row['battery_level'] else 0,
+                'ignition_state': row['ignition_state'],
+                'operator': operator,
+                'rat': row.get('rat') or '',
+            }
 
         try:
-            ws.send(json.dumps(data, separators=(',', ':')))
+            if data is not None:
+                ws.send(json.dumps(data, separators=(',', ':')))
+                last_ping = time.time()
+            elif time.time() - last_ping >= 10:
+                ws.send('{"ping":true}')
+                last_ping = time.time()
         except Exception:
             return
+
+        time.sleep(1)
 
 
 # -- UDP listener ------------------------------------------------------------
@@ -1413,24 +1406,45 @@ def ws_carpos(ws):
 NONCE_BYTES = 12
 TAG_BYTES = 16
 
-# In-memory nonce-replay window per device. Restart loses the window but the
-# next packet's nonce is fresh randomness (~2^-96 collision risk), so the
-# only practical impact is that a same-second replay across a server restart
-# would slip through once.
+# In-memory nonce-replay window per device; the most recent nonce is also
+# persisted (device.last_nonce) so a server restart can't allow the single
+# most-recent captured packet to be replayed.
 _seen_nonces = {}
 _NONCE_WINDOW = 1024
 _seen_nonces_lock = threading.Lock()
 
 
 def _nonce_seen(device_id, nonce):
+    """Return True if this nonce has been seen recently for this device.
+    Updates both the in-memory window and the persisted last_nonce."""
     with _seen_nonces_lock:
-        win = _seen_nonces.setdefault(device_id, [])
+        win = _seen_nonces.get(device_id)
+        if win is None:
+            # First datagram from this device since process start — seed the
+            # window from the persisted last_nonce so we still reject a same-
+            # second replay across a restart.
+            persisted = udp_db.one(
+                'SELECT last_nonce FROM `device` WHERE `id` = %s',
+                (device_id,),
+            )
+            seed = persisted and persisted.get('last_nonce')
+            win = [bytes(seed)] if seed else []
+            _seen_nonces[device_id] = win
+
         if nonce in win:
             return True
         win.append(nonce)
         if len(win) > _NONCE_WINDOW:
             del win[0]
-        return False
+
+    try:
+        udp_db.query(
+            'UPDATE `device` SET `last_nonce` = %s WHERE `id` = %s',
+            (nonce, device_id),
+        )
+    except Exception:
+        udp_log.exception('failed to persist last_nonce for device %s', device_id)
+    return False
 
 
 def _device_aead(device):
@@ -1444,63 +1458,86 @@ def _device_aead(device):
 
 
 def _decrypt_request(raw):
-    """Parse and decrypt a request envelope. Returns (device, plaintext) or
-    (None, None) on any failure (malformed, unknown IMEI, bad PSK, bad tag,
-    replay)."""
+    """Parse and decrypt a request envelope. Returns (device, plaintext,
+    req_nonce) or (None, None, None) on any failure (malformed, unknown IMEI,
+    bad PSK, bad tag, replay)."""
     if len(raw) < 1 + NONCE_BYTES + TAG_BYTES:
-        return None, None
+        return None, None, None
     imei_len = raw[0]
     if imei_len < 14 or imei_len > 16:
-        return None, None
+        return None, None, None
     if len(raw) < 1 + imei_len + NONCE_BYTES + TAG_BYTES:
-        return None, None
+        return None, None, None
 
     imei_bytes = bytes(raw[1:1 + imei_len])
     try:
         imei = imei_bytes.decode('ascii')
     except UnicodeDecodeError:
-        return None, None
+        return None, None, None
     if not imei.isdigit():
-        return None, None
+        return None, None, None
 
     nonce = bytes(raw[1 + imei_len:1 + imei_len + NONCE_BYTES])
     ct_and_tag = bytes(raw[1 + imei_len + NONCE_BYTES:])
 
     device = udp_db.one('select * from `device` where `imei` = %s', (imei,))
     if not device:
-        return None, None
+        return None, None, None
 
     aead = _device_aead(device)
     if aead is None:
-        return None, None
+        return None, None, None
 
     try:
         pt = aead.decrypt(nonce, ct_and_tag, imei_bytes)
     except InvalidTag:
-        return None, None
+        return None, None, None
 
     if _nonce_seen(device['id'], nonce):
-        return None, None
+        return None, None, None
 
-    return device, pt
+    return device, pt, nonce
 
 
-def _encrypt_response(device, plaintext):
+def _encrypt_response(device, plaintext, req_nonce):
+    """Seal a response bound to the request's nonce. The device verifies that
+    its cached request-nonce matches the AAD; otherwise AEAD auth fails, so a
+    replayed response from a prior exchange is rejected."""
     aead = _device_aead(device)
     if aead is None:
         return None
     nonce = secrets.token_bytes(NONCE_BYTES)
-    aad = device['imei'].encode('ascii')
+    aad = device['imei'].encode('ascii') + req_nonce
     ct = aead.encrypt(nonce, plaintext.encode('ascii'), aad)
     return nonce + ct
+
+
+_decrypt_fail_counters = {}
+_decrypt_fail_lock = threading.Lock()
+_DECRYPT_FAIL_WINDOW_SEC = 60
+_DECRYPT_FAIL_LOG_EVERY = 20
+
+
+def _should_log_decrypt_fail(ip):
+    """Log the first failure per IP per window, then 1-in-N after that.
+    Prevents a spoofed-UDP flood from filling udp.log."""
+    now = time.monotonic()
+    with _decrypt_fail_lock:
+        entry = _decrypt_fail_counters.get(ip)
+        if entry is None or now - entry[0] >= _DECRYPT_FAIL_WINDOW_SEC:
+            _decrypt_fail_counters[ip] = [now, 1]
+            return True
+        entry[1] += 1
+        return entry[1] % _DECRYPT_FAIL_LOG_EVERY == 0
 
 
 def handle_datagram(raw, addr):
     """Process a UDP datagram and return response bytes (or None on failure)."""
     ip = addr[0]
-    device, pt = _decrypt_request(raw)
+    device, pt, req_nonce = _decrypt_request(raw)
     if device is None:
-        udp_log.warning('decrypt failed from %s (%d bytes)', ip, len(raw))
+        if _should_log_decrypt_fail(ip):
+            udp_log.warning('decrypt failed from %s (%d bytes)', ip, len(raw))
         return None
 
     imei = device['imei']
@@ -1565,7 +1602,7 @@ def handle_datagram(raw, addr):
         udp_db.query(f"DELETE FROM `command` WHERE `id` IN ({placeholders})", cmd_ids)
         udp_log.info('delivered %d commands to %s: %s', len(commands), imei, cmd_str)
 
-    return _encrypt_response(device, resp)
+    return _encrypt_response(device, resp, req_nonce)
 
 
 def udp_listener():

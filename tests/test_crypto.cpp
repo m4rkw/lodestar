@@ -87,6 +87,39 @@ void test_empty_plaintext() {
     ASSERT_TRUE(cp_open(key, nonce, NULL, 0, NULL, 0, tag, NULL) == 0);
 }
 
+// Challenge-response binding: server seals response with
+// AAD = IMEI || req_nonce. Replaying the response against a different
+// (stale) req_nonce must fail the Poly1305 check.
+void test_response_replay_different_request_nonce() {
+    uint8_t key[32];
+    uint8_t req_nonce_a[12], req_nonce_b[12], resp_nonce[12];
+    for (int i = 0; i < 32; i++) key[i] = (uint8_t)i;
+    for (int i = 0; i < 12; i++) { req_nonce_a[i] = 0x11; req_nonce_b[i] = 0x22; resp_nonce[i] = 0x33; }
+    const char *imei = "357706041234567";
+    size_t imei_len = strlen(imei);
+
+    uint8_t aad_a[15 + 12], aad_b[15 + 12];
+    memcpy(aad_a, imei, imei_len); memcpy(aad_a + imei_len, req_nonce_a, 12);
+    memcpy(aad_b, imei, imei_len); memcpy(aad_b + imei_len, req_nonce_b, 12);
+
+    const char *msg = "1,3600,0,1";
+    size_t msg_len = strlen(msg);
+    uint8_t ct[16], tag[16], pt[16];
+
+    // Server seals response bound to request A's nonce.
+    cp_seal(key, resp_nonce, aad_a, imei_len + 12,
+            (const uint8_t*)msg, msg_len, ct, tag);
+
+    // Device with request A's nonce opens successfully.
+    ASSERT_TRUE(cp_open(key, resp_nonce, aad_a, imei_len + 12,
+                        ct, msg_len, tag, pt));
+    ASSERT_TRUE(memcmp(pt, msg, msg_len) == 0);
+
+    // Device with request B's nonce (different session / after reboot) must reject.
+    ASSERT_TRUE(cp_open(key, resp_nonce, aad_b, imei_len + 12,
+                        ct, msg_len, tag, pt) == 0);
+}
+
 int main() {
     printf("crypto:\n");
     RUN_TEST(test_rfc_vector);
@@ -97,5 +130,6 @@ int main() {
     RUN_TEST(test_aad_tamper);
     RUN_TEST(test_wrong_key);
     RUN_TEST(test_empty_plaintext);
+    RUN_TEST(test_response_replay_different_request_nonce);
     TEST_REPORT();
 }
